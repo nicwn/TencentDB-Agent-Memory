@@ -48,8 +48,8 @@ TypeScript directly — no build step.
 ### Option A — install from git (recommended for sharing)
 
 ```bash
-pi install git:github.com/nicwn/TencentDB-Pi-Memory
-# or pinned: pi install git:github.com/nicwn/TencentDB-Pi-Memory@<tag-or-commit>
+pi install git:github.com/nicwn/TencentDB-Agent-Memory
+# or pinned: pi install git:github.com/nicwn/TencentDB-Agent-Memory@<tag-or-commit>
 ```
 
 pi clones the repo under `~/.pi/agent/git/` and runs `npm install` for you.
@@ -57,7 +57,7 @@ Use `-l` to install into the project's `.pi/settings.json` instead of the
 global settings, or try it once without installing:
 
 ```bash
-pi -e git:github.com/nicwn/TencentDB-Pi-Memory
+pi -e git:github.com/nicwn/TencentDB-Agent-Memory
 ```
 
 ### Option B — install from a local checkout

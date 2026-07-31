@@ -394,7 +394,7 @@ and the symbolic short-term memory / context-offload pipeline (opt-in).
 
 ```bash
 # from git (pi runs npm install for you)
-pi install git:github.com/nicwn/TencentDB-Pi-Memory
+pi install git:github.com/nicwn/TencentDB-Agent-Memory
 
 # or from a local checkout
 cd /path/to/TencentDB-Agent-Memory && npm install
