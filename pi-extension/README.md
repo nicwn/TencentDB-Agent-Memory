@@ -148,6 +148,38 @@ To enable context offload add:
   specialist agents; otherwise a dirname+hash id is derived).
 - `capture` / `recall` — set `false` to opt this project out.
 
+## Staying in sync with upstream
+
+**Never use GitHub's "Sync fork" button on this repository.**
+
+That button only fast-forwards. This fork carries commits upstream does not have
+(the whole `pi-extension/` layer plus small edits to `.gitignore`, `README.md`,
+`package.json` and `src/`), so it can never fast-forward, and GitHub's only
+offer is **"Discard commits"** — which deletes the pi adaptation. This has
+already cost us the adaptation once; see commit `7ae263b`
+("fix(pi): restore full pi adaptation lost in upstream sync").
+
+Use the script instead:
+
+```bash
+bin/sync-upstream.sh --dry-run   # what's incoming + conflict pre-check
+bin/sync-upstream.sh             # merge + test + build gate, stops before push
+bin/sync-upstream.sh --push      # ...and push to origin on success
+```
+
+It refuses to run on a dirty tree, merges (never rebases — our commits are
+already pushed, so rewriting them is the exact failure mode we're avoiding),
+then gates on `npm test` and `npm run build`, rolling back to the pre-merge
+commit if either fails.
+
+**Why conflicts are rare:** almost all fork changes live in `pi-extension/`, a
+directory upstream doesn't have. Only four shared files are touched. When a
+conflict does occur, the rule is: keep the fork's pi changes, take upstream's
+changes to files we don't modify.
+
+After a sync that touches `src/`, **restart pi** — the extension imports
+`../src/*.ts` directly, so merged changes go live on next start.
+
 ## Troubleshooting
 
 - Log file: `~/.pi/agent/memory-tdai/logs/pi-extension.log`
