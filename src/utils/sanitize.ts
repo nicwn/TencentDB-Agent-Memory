@@ -312,6 +312,12 @@ export function escapeXmlTags(text: string): string {
  *  2. **Fallback** — if the precise pass still fails `JSON.parse`, fall back to
  *     a simple global strip of rare control chars (\x00–\x08, \x0b, \x0c,
  *     \x0e–\x1f) which are almost never meaningful in natural-language content.
+ *  3. **Structural repair** — if it *still* fails, repair the two malformed-JSON
+ *     shapes LLMs actually emit: trailing commas before `}`/`]`, and unescaped
+ *     `"` inside string values (which produces
+ *     "Expected ',' or '}' after property value"). Each repair is validated by
+ *     `JSON.parse`; the original is returned unchanged if nothing helps, so the
+ *     caller still sees a real parse error rather than silent corruption.
  */
 export function sanitizeJsonForParse(raw: string): string {
   // Phase 1: Escape control characters inside JSON string literals.
@@ -330,7 +336,133 @@ export function sanitizeJsonForParse(raw: string): string {
   // control-character escaping Phase 1 performed is preserved even when the JSON has
   // other issues (e.g. trailing commas) that cause the Phase 1 parse to fail.
   const stripped = escaped.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "");
-  return stripped;
+  try {
+    JSON.parse(stripped);
+    return stripped;
+  } catch {
+    // Phase 2 didn't fix it either — fall through to phase 3
+  }
+
+  // Phase 3: Structural repair of malformed shapes LLMs actually produce.
+  // Applied cumulatively, each step validated before being accepted.
+  const noTrailingCommas = stripTrailingCommas(stripped);
+  try {
+    JSON.parse(noTrailingCommas);
+    return noTrailingCommas;
+  } catch {
+    // still broken — try the inner-quote repair on top
+  }
+
+  const quotesRepaired = escapeStrayQuotesInJsonStrings(noTrailingCommas);
+  try {
+    JSON.parse(quotesRepaired);
+    return quotesRepaired;
+  } catch {
+    // Unrepairable. Return the Phase 2 result so the caller's JSON.parse throws
+    // a genuine error on the closest-to-original text.
+    return stripped;
+  }
+}
+
+/**
+ * Remove trailing commas that appear immediately before `}` or `]`, ignoring
+ * commas that occur inside string literals.
+ */
+function stripTrailingCommas(text: string): string {
+  const out: string[] = [];
+  let inString = false;
+  let i = 0;
+
+  while (i < text.length) {
+    const ch = text[i]!;
+
+    if (inString) {
+      if (ch === "\\") {
+        out.push(ch, text[i + 1] ?? "");
+        i += 2;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      out.push(ch);
+      i++;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      out.push(ch);
+      i++;
+      continue;
+    }
+
+    if (ch === ",") {
+      // Look ahead past whitespace for a closing bracket.
+      let j = i + 1;
+      while (j < text.length && /\s/.test(text[j]!)) j++;
+      const next = text[j];
+      if (next === "}" || next === "]") {
+        i++; // drop the comma, keep the whitespace loop going naturally
+        continue;
+      }
+    }
+
+    out.push(ch);
+    i++;
+  }
+
+  return out.join("");
+}
+
+/**
+ * Escape stray `"` characters that appear *inside* JSON string values.
+ *
+ * Heuristic: while inside a string literal, a `"` only legitimately closes the
+ * string if the next non-whitespace character is one of `,` `}` `]` `:` or EOF.
+ * Anything else means the LLM emitted an unescaped inner quote, so we escape it
+ * and stay inside the string.
+ */
+function escapeStrayQuotesInJsonStrings(text: string): string {
+  const CLOSERS = new Set([",", "}", "]", ":"]);
+  const out: string[] = [];
+  let inString = false;
+  let i = 0;
+
+  while (i < text.length) {
+    const ch = text[i]!;
+
+    if (!inString) {
+      if (ch === '"') inString = true;
+      out.push(ch);
+      i++;
+      continue;
+    }
+
+    // Inside a string literal.
+    if (ch === "\\") {
+      out.push(ch, text[i + 1] ?? "");
+      i += 2;
+      continue;
+    }
+
+    if (ch === '"') {
+      let j = i + 1;
+      while (j < text.length && /\s/.test(text[j]!)) j++;
+      const next = text[j];
+      if (next === undefined || CLOSERS.has(next)) {
+        inString = false;
+        out.push(ch);
+      } else {
+        out.push('\\"'); // stray inner quote — escape it, stay in the string
+      }
+      i++;
+      continue;
+    }
+
+    out.push(ch);
+    i++;
+  }
+
+  return out.join("");
 }
 
 /**

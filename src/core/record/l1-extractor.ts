@@ -372,7 +372,25 @@ function parseExtractionResult(raw: string, logger?: Logger): SceneSegment[] {
 
     // Sanitize control characters inside JSON string literals that LLM may produce
     const sanitized = sanitizeJsonForParse(arrayMatch[0]);
-    const parsed = JSON.parse(sanitized) as unknown[];
+    let parsed: unknown[];
+    try {
+      parsed = JSON.parse(sanitized) as unknown[];
+    } catch (parseErr) {
+      // [l1-debug] PARSE_FAIL — sanitization could not repair the payload.
+      // Dump enough context to diagnose which malformed shape the LLM emitted,
+      // centred on the reported error offset so the actual defect is visible.
+      const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+      const posMatch = msg.match(/position (\d+)/);
+      const pos = posMatch ? Number(posMatch[1]) : 0;
+      const from = Math.max(0, pos - 300);
+      const to = Math.min(sanitized.length, pos + 300);
+      logger?.warn?.(
+        `${TAG} [l1-debug] PARSE_FAIL taskId=l1-extraction, error=${JSON.stringify(msg)}, ` +
+          `rawLen=${raw.length}, sanitizedLen=${sanitized.length}, errorPos=${pos}, ` +
+          `window[${from}..${to}]=${JSON.stringify(sanitized.slice(from, to))}`,
+      );
+      throw parseErr;
+    }
 
     if (!Array.isArray(parsed)) {
       logger?.warn?.(`${TAG} Extraction response is not an array`);
