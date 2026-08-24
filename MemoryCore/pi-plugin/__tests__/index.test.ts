@@ -41,6 +41,7 @@ describe("pi-plugin", () => {
   it("registers a 'tdai' provider with /v1 baseUrl and static identity headers", () => {
     const api: any = {
       registerProvider: (name: string, cfg: any) => registerProviderCalls.push({ name, cfg }),
+      registerTool: () => {},
       on: (evt: string, h: any) => onCalls.push({ evt, h }),
     };
     factory(api);
@@ -59,6 +60,7 @@ describe("pi-plugin", () => {
   it("registers a before_provider_headers hook", () => {
     const api: any = {
       registerProvider: () => {},
+      registerTool: () => {},
       on: (evt: string, h: any) => onCalls.push({ evt, h }),
     };
     factory(api);
@@ -70,6 +72,7 @@ describe("pi-plugin", () => {
     const localOnCalls: { evt: string; h: any }[] = [];
     const api: any = {
       registerProvider: () => {},
+      registerTool: () => {},
       on: (evt: string, h: any) => localOnCalls.push({ evt, h }),
     };
     factory(api);
@@ -92,7 +95,7 @@ describe("pi-plugin", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const registerProvider = vi.fn();
     const on = vi.fn();
-    const api: any = { registerProvider, on };
+    const api: any = { registerProvider, registerTool: () => {}, on };
     // Must NOT throw — a startup extension must never block Pi from loading.
     expect(() => failingFactory(api)).not.toThrow();
     // Must NOT register the provider or hook when env is missing.
@@ -112,6 +115,7 @@ describe("pi-plugin", () => {
     const onCalls: { evt: string; h: any }[] = [];
     const api: any = {
       registerProvider: (name: string, cfg: any) => registerProviderCalls.push({ name, cfg }),
+      registerTool: () => {},
       on: (evt: string, h: any) => onCalls.push({ evt, h }),
     };
     // Must NOT throw and MUST still register (task is optional).
@@ -122,5 +126,44 @@ describe("pi-plugin", () => {
     expect(cfg.headers["x-agent-id"]).toBe("agt-ea0b0wybln");
     // No x-task-id header when task is absent → proxy registers with broad recall.
     expect(cfg.headers["x-task-id"]).toBeUndefined();
+  });
+
+  it("registers an ask_followup_question tool that picks and returns XML", async () => {
+    const registerTool = vi.fn();
+    const api: any = { registerProvider: () => {}, registerTool, on: () => {} };
+    factory(api);
+    expect(registerTool).toHaveBeenCalled();
+    const tool = registerTool.mock.calls[0][0];
+    expect(tool.name).toBe("ask_followup_question");
+
+    // The proxy's args (double-encoded questions string). Pi parses
+    // function.arguments against the tool's parameters schema before calling
+    // execute, so params arrives as { title: string, questions: string }.
+    const params = {
+      title: "会话初始化 — 选择 Team",
+      questions: JSON.stringify([{ id: "team", question: "Team?", options: ["Team A (a1b2c3d4)"], multiSelect: false }]),
+    };
+    const ctx: any = {
+      mode: "tui", hasUI: true,
+      ui: { custom: async (factory: any) => {
+        const comp = factory({ requestRender() {} }, { fg: (_c: string, s: string) => s }, {}, (d: any) => d);
+        comp.handleInput("\r"); // Enter → first option
+        return { id: "team", answer: "Team A (a1b2c3d4)" };
+      } },
+    };
+    const res = await tool.execute("call_session_init_123", params, undefined, undefined, ctx);
+    expect(res.content[0].type).toBe("text");
+    expect(res.content[0].text).toContain("Team A (a1b2c3d4)");
+    expect(res.content[0].text).toContain("<question_answer>");
+  });
+
+  it("the ask_followup_question tool no-ops for non-session-init ids", async () => {
+    const registerTool = vi.fn();
+    const api: any = { registerProvider: () => {}, registerTool, on: () => {} };
+    factory(api);
+    const tool = registerTool.mock.calls[0][0];
+    const res = await tool.execute("call_some_other_id", { title: "x", questions: "[]" }, undefined, undefined, { mode: "tui", hasUI: true, ui: { custom: async () => null } });
+    // Non-matching id → must NOT render a picker and must return a benign skip.
+    expect(res.content[0].text).toMatch(/session-init|skip/i);
   });
 });
